@@ -1,18 +1,12 @@
-import multiprocessing
-from multiprocessing import process
 from pathlib import Path
 import queue
 import numpy as np
-from crop import CLASS_NUM
-import cv2
-import time
 import os
 import argparse
 from PIL import Image, ImageDraw
-from random import randint
-from numpy.random import normal
-from multiprocessing import Process, Queue
-
+from multiprocessing import Process, Queue, cpu_count
+from time import time
+from numpy.random import randint, normal
 
 PIC_WIDTH = 10000
 PIC_HEIGHT = 10000
@@ -23,17 +17,17 @@ FIGURES = ['rectangle', 'ellipse', 'cross', 'triangle']
 FIGURE_WIDTH = 40
 FIGURE_HEIGHT = 40
 
-NOISE_LEVEL = 1
-NOISE_SIGMA = 10.0
+NOISE_MEAN = 0.0
 
 DENSITY_CONST = 4
 
+FOLDER = 'D:\Learning\MSU\Year 4th\Diploma Files'
 
-def generate_pics(folder: Path, class_num: int, num_of_imgs: int):
+
+def generate_pics(save_folder_path: Path, class_num: int, num_of_imgs: int, is_noised: bool, noise_sigma: float):
     density = int(DENSITY_CONST * PIC_HEIGHT)
 
-    fig = class_num % 4
-    color = class_num // 4
+    fig, color = class_num % 4, class_num // 4
     if color > 4:
         raise Exception("Class number can't be bigger than 20!")
     elif color == 0:
@@ -47,46 +41,51 @@ def generate_pics(folder: Path, class_num: int, num_of_imgs: int):
     else:
         r, g, b = (128, 0, 128)
 
+    dsizes = randint(-5, 5, size=(num_of_imgs, density))
+    dcolors = randint(-20, 20, size=(num_of_imgs, density))
+
     for img_num in range(num_of_imgs):
         image = Image.new(mode="RGB", size=(PIC_WIDTH, PIC_HEIGHT),
                           color=(255, 255, 255))
         draw = ImageDraw.Draw(image)
 
         for k in range(density):
-            dsize = randint(-5, 5)
-
+            dsize = dsizes[img_num, k]
             x = randint(0, PIC_WIDTH - FIGURE_WIDTH - dsize)
             y = randint(0, PIC_HEIGHT - FIGURE_HEIGHT - dsize)
 
-            dcolor = randint(-20, 20)
-            if FIGURES[fig] == 'rectangle':
-                draw.rectangle(xy=[x, y, x + FIGURE_WIDTH + dsize, y + FIGURE_HEIGHT + dsize],
-                               fill=(r + dcolor, g + dcolor, b + dcolor))
-            elif FIGURES[fig] == 'ellipse':
-                draw.ellipse(xy=[x, y, x + FIGURE_WIDTH + dsize, y + FIGURE_HEIGHT + dsize],
-                             fill=(r + dcolor, g + dcolor, b + dcolor))
-            elif FIGURES[fig] == 'cross':
-                draw.line(xy=[(x, y), (x + FIGURE_WIDTH + dsize, y + FIGURE_HEIGHT + dsize)],
-                          fill=(r + dcolor, g + dcolor, b + dcolor), width=7)
-                draw.line(xy=[(x, y + FIGURE_HEIGHT + dsize), (x + FIGURE_WIDTH + dsize, y)],
-                          fill=(r + dcolor, g + dcolor, b + dcolor), width=7)
-            else:
-                draw.polygon(xy=[(x, y + FIGURE_HEIGHT + dsize),
-                                 (x + (FIGURE_WIDTH + dsize) // 2, y),
-                                 (x + FIGURE_WIDTH + dsize, y + FIGURE_HEIGHT + dsize)],
-                             fill=(r + dcolor, g + dcolor, b + dcolor))
+            x1 = x + FIGURE_WIDTH + dsize
+            y1 = y + FIGURE_HEIGHT + dsize
 
-        noise = normal(0.0, NOISE_SIGMA, (PIC_WIDTH // 2, PIC_HEIGHT // 2))
-        noise = np.array(Image.fromarray(noise).resize((PIC_WIDTH, PIC_HEIGHT), resample=Image.BILINEAR))
-        img = np.array(image, dtype=np.float64)
-        for channel in range(img.shape[2]):
-            img[:, :, channel] += NOISE_LEVEL * noise
-        cv2.normalize(img, img, 0, 255, cv2.NORM_MINMAX)
-        Image.fromarray(img.astype(np.uint8)).save(folder / Path(str(class_num) + '_' + str(img_num) + '.png'))
+            dcolor = dcolors[img_num, k]
+            r1, g1, b1 = r + dcolor, g + dcolor, b + dcolor
+
+            if fig == 0:
+                draw.rectangle(xy=[x, y, x1, y1], fill=(r1, g1, b1))
+            elif fig == 1:
+                draw.ellipse(xy=[x, y, x1, y1], fill=(r1, g1, b1))
+            elif fig == 2:
+                draw.line(xy=[(x, y), (x1, y1)], fill=(r1, g1, b1), width=7)
+                draw.line(xy=[(x, y1), (x1, y)], fill=(r1, g1, b1), width=7)
+            else:
+                draw.polygon(xy=[(x, y1), (x + (FIGURE_WIDTH + dsizes[img_num, k]) // 2, y), (x1, y1)],
+                             fill=(r1, g1, b1))
+        if is_noised:
+            img = np.array(image, dtype=np.int16)
+            noise = normal(NOISE_MEAN, noise_sigma, size=(img.shape[0] // 2, img.shape[1] // 2, 3)) + 128
+            noise = np.array(Image.fromarray(noise.astype(np.uint8)).resize(img.shape[:2]))
+            # noised = np.clip(img + noise - 128, 0, 255)
+            noised = img + noise - 128
+            noised[noised > 255] = 255
+            noised[noised < 0] = 0
+            image1 = Image.fromarray(noised.astype(np.uint8)).save(save_folder_path / Path(str(class_num) + '_' + str(img_num) + '.jpg'))
+        else:
+            image.save(save_folder_path / Path(str(class_num) + '_' + str(img_num) + '.jpg'))
+        print(f"image {class_num}_{img_num} created!")
 
 
 def do_job(tasks_to_do):
-    while True:
+    while 1:
         try:
             task = tasks_to_do.get_nowait()
             generate_pics(*task)
@@ -97,13 +96,14 @@ def do_job(tasks_to_do):
     return True
 
 
-def generate_pics_parallel(save_folder: Path, num_of_classes: int, num_of_imgs: int):
-    if not os.path.isdir(save_folder):
-        os.mkdir(save_folder)
+def generate_pics_parallel(save_folder_path: Path, num_of_classes: int, num_of_imgs: int, is_noised: bool,
+                           noise_sigma: float):
+    if not os.path.isdir(save_folder_path):
+        os.mkdir(save_folder_path)
 
-    input_params = [(save_folder, i, num_of_imgs) for i in range(num_of_classes))]
-    
-    number_of_processes = multiprocessing.cpu_count()
+    input_params = [(save_folder_path, i, num_of_imgs, is_noised, noise_sigma) for i in range(num_of_classes)]
+
+    number_of_processes = cpu_count() - 1
     tasks_to_do = Queue()
     processes = []
 
@@ -121,9 +121,12 @@ def generate_pics_parallel(save_folder: Path, num_of_classes: int, num_of_imgs: 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('save_folder', help='Save folder')
+    parser.add_argument('save_folder', help='Name of save folder')
     parser.add_argument('num_of_classes', type=int, help='Number of classes')
     parser.add_argument('num_of_imgs', type=int, help='Number of images in one class to generate')
+    parser.add_argument('is_noised', type=int)
+    parser.add_argument('noise_sigma', type=float)
     args = parser.parse_args()
 
-    generate_pics_parallel(Path(args.save_folder), args.num_of_classes, args.num_of_imgs)
+    generate_pics_parallel(Path(FOLDER) / Path(args.save_folder), args.num_of_classes, args.num_of_imgs, args.is_noised,
+                           args.noise_sigma)
