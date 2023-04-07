@@ -5,14 +5,13 @@ import os
 import argparse
 from PIL import Image, ImageDraw
 from multiprocessing import Process, Queue, cpu_count
-from time import time
 from numpy.random import randint, normal
 
 PIC_WIDTH = 10000
 PIC_HEIGHT = 10000
 
-COLORS = ['red', 'green', 'blue', 'yellow', 'purple']
-FIGURES = ['rectangle', 'ellipse', 'cross', 'triangle']
+COLORS = ["red", "green", "blue", "yellow", "purple"]
+FIGURES = ["rectangle", "ellipse", "cross", "triangle"]
 
 FIGURE_WIDTH = 40
 FIGURE_HEIGHT = 40
@@ -21,9 +20,10 @@ NOISE_MEAN = 0.0
 
 DENSITY_CONST = 4
 
-FOLDER = 'D:\Learning\MSU\Year 4th\Diploma Files'
+FOLDER = "D:\\Learning\\MSU\\Year 4th\\Diploma Files"
 
 
+# Функция генерирует num_of_imgs картинок для класса class_num
 def generate_pics(save_folder_path: Path, class_num: int, num_of_imgs: int, is_noised: bool, noise_sigma: float):
     density = int(DENSITY_CONST * PIC_HEIGHT)
 
@@ -61,7 +61,7 @@ def generate_pics(save_folder_path: Path, class_num: int, num_of_imgs: int, is_n
             r1, g1, b1 = r + dcolor, g + dcolor, b + dcolor
 
             if fig == 0:
-                draw.rectangle(xy=[x, y, x1, y1], fill=(r1, g1, b1))
+                draw.rectangle(xy=(x, y, x1, y1), fill=(r1, g1, b1))
             elif fig == 1:
                 draw.ellipse(xy=[x, y, x1, y1], fill=(r1, g1, b1))
             elif fig == 2:
@@ -70,6 +70,7 @@ def generate_pics(save_folder_path: Path, class_num: int, num_of_imgs: int, is_n
             else:
                 draw.polygon(xy=[(x, y1), (x + (FIGURE_WIDTH + dsizes[img_num, k]) // 2, y), (x1, y1)],
                              fill=(r1, g1, b1))
+        # Добавление шума
         if is_noised:
             img = np.array(image, dtype=np.int16)
             noise = normal(NOISE_MEAN, noise_sigma, size=(img.shape[0] // 2, img.shape[1] // 2, 3)) + 128
@@ -80,15 +81,17 @@ def generate_pics(save_folder_path: Path, class_num: int, num_of_imgs: int, is_n
             noised[noised < 0] = 0
             image1 = Image.fromarray(noised.astype(np.uint8)).save(save_folder_path / Path(str(class_num) + '_' + str(img_num) + '.jpg'))
         else:
-            image.save(save_folder_path / Path(str(class_num) + '_' + str(img_num) + '.jpg'))
+            image.save(save_folder_path / Path(f'{class_num}_{img_num}.jpg'))
         print(f"image {class_num}_{img_num} created!")
 
 
 def do_job(tasks_to_do):
     while 1:
         try:
+            # Вытаскиваем из очереди входные данные и передаем их функции generate_pics
             task = tasks_to_do.get_nowait()
             generate_pics(*task)
+        # Если очередь пуста, выходим из цикла
         except queue.Empty:
             break
         else:
@@ -96,25 +99,30 @@ def do_job(tasks_to_do):
     return True
 
 
+# Функция генерирует num_of_imgs картинок для каждого класса параллельно
 def generate_pics_parallel(save_folder_path: Path, num_of_classes: int, num_of_imgs: int, is_noised: bool,
                            noise_sigma: float):
     if not os.path.isdir(save_folder_path):
         os.mkdir(save_folder_path)
 
+    # Входные параметры функции генерации картинок для каждого класса
     input_params = [(save_folder_path, i, num_of_imgs, is_noised, noise_sigma) for i in range(num_of_classes)]
 
     number_of_processes = cpu_count() - 1
     tasks_to_do = Queue()
     processes = []
 
+    # Кладем входные параметры для каждого класса в очередь для параллельного выполнения
     for i in input_params:
         tasks_to_do.put(i)
 
+    # Запускаем number_of_processes потоков
     for _ in range(number_of_processes):
         p = Process(target=do_job, args=(tasks_to_do,))
         processes.append(p)
         p.start()
 
+    # Ждем окончания выполнения всех запущенных потоков
     for p in processes:
         p.join()
 

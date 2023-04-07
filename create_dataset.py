@@ -8,7 +8,6 @@ from random import randint
 from pathlib import Path
 from multiprocessing import Process, Queue
 from tensorflow.keras.utils import to_categorical
-from time import time
 
 PATCH_WIDTH: int = 224
 PATCH_HEIGHT: int = 224
@@ -17,7 +16,7 @@ NUM_OF_PATCHES: int = 20
 PIC_WIDTH: int = 10000
 PIC_HEIGHT: int = 10000
 
-FOLDER: str = 'D:\Learning\MSU\Year 4th\Diploma Files'
+FOLDER: str = 'D:\\Learning\\MSU\\Year 4th\\Diploma Files'
 
 
 def scale_range(start, stop, step):
@@ -27,6 +26,7 @@ def scale_range(start, stop, step):
         i += 1
 
 
+# Функция генерирует набор данных из блоков изображения на конкретном масштабе
 def create_dataset(scale: float, height: int, width: int, num_classes: int, num_imgs: int, input_folder_path: Path,
                    common_save_folder_path: Path):
     data = []
@@ -35,7 +35,7 @@ def create_dataset(scale: float, height: int, width: int, num_classes: int, num_
     size = (int(scale * height), int(scale * width))
     for class_num in range(num_classes):
         for img_num in range(num_imgs):
-            img = np.array(Image.open(input_folder_path / Path(str(class_num) + '_' + str(img_num) + '.jpg')),
+            img = np.array(Image.open(input_folder_path / Path(f'{class_num}_{img_num}.jpg')),
                            copy=False)
             for k in range(NUM_OF_PATCHES):
                 x = randint(0, PIC_HEIGHT - size[0])
@@ -63,6 +63,7 @@ def do_job(tasks_to_do):
     return True
 
 
+# Функция генерирует датасеты по масштабам параллельно
 def create_tests_parallel(args):
     common_save_folder_path = Path(FOLDER) / Path(args.save_folder)
     input_folder_path = Path(FOLDER) / Path(args.input)
@@ -70,7 +71,8 @@ def create_tests_parallel(args):
         os.mkdir(common_save_folder_path)
 
     input_params = [
-        (scale, PATCH_HEIGHT, PATCH_WIDTH, args.num_of_classes, args.num_of_imgs, input_folder_path, common_save_folder_path) for
+        (scale, PATCH_HEIGHT, PATCH_WIDTH, args.num_of_classes, args.num_of_imgs, input_folder_path,
+         common_save_folder_path) for
         scale in scale_range(0.5, 10.0, 0.1)]
 
     number_of_processes = multiprocessing.cpu_count() - 1
